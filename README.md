@@ -235,13 +235,20 @@ instance Eq Direction where
   (==) Right Right = True
 ```
 
-​	利用 type class 可以为泛型参数提供接口限制, 例如
+​	通过 type class 实现某个接口与直接定义一组函数并无区别, 但是利用 type class 可以为泛型参数提供接口限制, 例如
 
 ```haskell
 foo :: (Eq a) => a -> a -> String
 foo x y = case x == y of 
   True -> "Same Direction"
   False -> "Different Direction"
+```
+
+​	在定义 type class 时可以引入依赖, 要求类型参数必须实现了某个接口, 例如
+
+```haskell
+class Eq a => Compare a where
+	eq :: a -> a -> Bool
 ```
 
 ​	有时, 当某个类型实现了某个接口时, 则其代数类型也可以自动实现某个接口. 例如, 当 `a` 实现了 `Eq` 时, 则 `Maybe a` 应该也可以实现 `Eq`,
@@ -492,3 +499,83 @@ fmap :: (a -> b) -> (e -> a) -> (e -> b)
 instance Functor ((->) e) where
   fmap = (.)
 ```
+
+#### Applicative Functors
+
+​	在 Functor 中, Functor 可以完成如下的映射
+
+```haskell
+fmap :: (a -> b) -> (f a -> f b)
+```
+
+`fmap` 只能接受 kind 为 `* -> *` 的 HKT, 若是 `* -> * -> *` 则无能为力. 
+
+​	考虑如下的函数
+
+```haskell
+fmap0 :: a -> f a
+fmap  :: (a -> b) -> (f a -> f b)
+fmap2 :: (a -> b -> c) -> (f a -> f b -> f c)
+```
+
+它们的结构非常相似, 于是我们设想能不能通过已有的 `fmap` 生成我们需要的. 
+
+​	观察 `fmap`, 若将 `b` 写为 `b -> c`, 则 
+
+```haskell
+fmap :: (a -> b -> c) -> f a -> f (b -> c)
+```
+
+这个形式就与 `fmap2` 比较相似, 但是不完全一样. 之所以提到这一点, 是因为 Haskell 的类型推导机制. 对于 `fmap`, 倘若我们传入第一个参数的类型为 `a -> b -> c`, 第二个参数类型为 `f a`, 则 `fmap  :: (a -> b) -> f a -> f b` 中的 `b` 就会被推导为 `b -> c`. 
+
+​	令
+
+```haskell
+h :: a -> b -> c
+fa :: Functor f => f a
+```
+
+则 `fmap h fa` 的类型为 `f (b -> c)`. 对比 `fmap :: (a -> b -> c) -> f a -> f (b -> c)` 和 `fmap2`, 只有后两个参数不同, 因此我们需要建立函数
+
+```haskell
+(<*>) :: f (b -> c) -> f b -> f c
+```
+
+​	于是 Haskell 提出了 Applicative Functors,
+
+```haskell
+class Functor f => Applicative f where
+  pure  :: a -> f a -- fmap0
+  (<*>) :: f (a -> b) -> f a -> f b
+```
+
+借助 `(<$>), (<*>)` 两个函数, 可以轻松构造所需要的函数, 例如
+
+```haskell
+liftA2 :: Applicative f => (a -> b -> c) -> f a -> f b -> f c
+lifeA2 g fa fb = g <$> fa <*> fb
+```
+
+结合之前介绍的函子的概念, 可以发现 `(<*>)` 其实就是函子所满足的的第二个条件:
+
+- 将每个态射 $f: X\rightarrow Y\in C$ 映射至一态射 $F(f): F(X)\rightarrow F(Y)\in D$
+
+##### examples
+
+```haskell
+instance Applicative Maybe where
+  pure = Just
+  Nothing <*> _ = Nothing
+  _ <*> Nothing = Nothing
+  (Just f) <*> (Just a) = Just (f a)
+```
+
+从 `Maybe` 的例子或许可以更容易理解, 对比
+
+```haskell
+instance Functor Maybe where
+  _ <$> Nothing = Nothing
+  f <$> (Just a) = Just (f a)
+```
+
+可以看出 `Applicative` 的实现将映射 `f` 是否存在(Just or Nothing)的情况也纳入了考虑. 理论上映射 `f :: a -> b -> c`  总是存在的, 是中间结果是否存在影响了结果, 也就是说 `Applicative` 的实现中左侧值为 `Nothing` 的情况实际上并非映射不存在, 而是中间结果出现了 `Nothing`, 从而导致后续结果均为 `Nothing`.
