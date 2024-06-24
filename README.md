@@ -124,7 +124,7 @@ lastElem (_:tail) = lastElem tail
 
 为一个整数tuple, 创建了一个 `+-` 运算符, 将第一个元素加上一个值, 第二个元素减去该值.
 
-​	由于运算符本质只是一个函数名, 这一点与C++的运算符重载并不相同, 所以运算符极易产生命名冲突. 因为这个原因, 一些比较特殊的运算符已经在标准库被使用, 不方便使用.
+​	由于运算符本质只是一个函数名, 这一点与C++的运算符重载并不相同, 所以运算符极易产生命名冲突. 很多运算符已经在标准库 Prelude 中被定义, 所以如果要定义自己的运算符, 应该避免导入 Prelude 中的运算符函数.
 
 #### Data
 
@@ -341,3 +341,154 @@ instance Monoid [a] where
 
 #### IO
 
+​	纯函数的最大缺点在于不能修改任何外部环境, 一个完全由纯函数组成的程序可以说没有任何用处, 连打印到终端观察程序运行的状态都无法做到.
+
+​	在 Haskell 中, 将非纯函数统统看作 `IO` 类型. 例如, Haskell 的打印函数为
+
+```haskell
+putStrLn :: String -> IO ()
+```
+
+传入一个字符串, 返回一个 `IO ()` 类型. 
+
+​	IO 本质是一个可以接受一个泛型参数的 Monad, Monad 的概念在之后才会介绍, 所以先不介绍 IO 的实现.
+
+##### Combining IO
+
+​	IO 操作在 Haskell 是可以叠加的,
+
+```haskell
+(>>) :: IO a -> IO b -> IO b
+```
+
+从而将两个 IO 操作串联
+
+```haskell
+main = putStrLn "Hello" >> putStrLn "world!"
+```
+
+这样的两个操作虽有先后关系, 但是没有依赖关系. 若是后一个操作依赖于前一个操作的结果, 则需要定义新的函数
+
+```haskell
+(>>=) :: IO a -> (a -> IO b) -> IO b
+```
+
+其将第二个参数由直接接受 `IO b` 改为了接受一个可以由结果 `a` 产生 `IO b` 的函数, 这样用户就可以决定如何由结果 `a` 产生结果 `b`. 
+
+#### Record Syntax
+
+​	在创建自定义类型时, 传统的语法为
+
+```haskell
+data D = C T1 T2 T3
+```
+
+其中 `T1 T2 T3` 可以看作自定义类型中字段的类型名. Record syntax 可以提供一种更详细的定义
+
+```haskell
+data D = C { field1 :: T1, field2 :: T2, field3 :: T3 }
+```
+
+这里 `field1` 看似是字段名, 本质上是一个函数
+
+```haskell
+field1 :: D -> T1
+```
+
+可以通过该函数+实例获取对应的字段.
+
+​	可以通过下面的方式创建一个实例
+
+```haskell
+C { field3 = ..., field1 = ..., field2 = ... }
+```
+
+顺序无关, 也不一定需要初始化所有的字段.
+
+#### Functors
+
+##### high kind types
+
+​	在 Haskel 中, 类型本身也有类型, 称为 "kinds". 在 ghci 中可以通过 `:k` 命令查看类型的 kind. 例如
+
+```haskell
+Prelude> :k Int
+Int :: *
+Prelude> :k Maybe Int
+Maybe Int :: *
+```
+
+这里的 `*` 表示一种类型, `Int :: *` 即表示 `Int` 是一种类型.
+
+​	既然 `Maybe Int ` 是一种类型, 那么 `Maybe` 本身是什么类型呢? 
+
+```haskell
+Prelude> :k Maybe
+Maybe :: * -> *
+```
+
+可以看到 `Maybe` 的类型与函数的类型十分类似, 只是其参数类型和结果类型均为 `*`, 即某种类型. 因此 `Maybe` 的类型就很清楚了, 这是一种将某种类型转换为另一种类型的类型. 例如 `Maybe`  可以将 `Int` 类型转换为 `Maybe Int` 类型. 这样的类型称为「高阶类型(High Kind Type, HKT)」.常见的 HKT 还有 `[]`, 例如其可以将 `Int` 转换为 `[Int]` 类型. 
+
+​	HKT 不只有 `* -> *` 一种类型, 考虑自定义类型
+
+```haskell
+data JoinList m a = Empty
+                  | Single m a
+                  | Append m (JoinList m a) (JoinList m a)
+```
+
+不需要借助 ghci, 可以直接看出 `JoinList` 的类型为 `* -> * -> *`, 因为其接受两个类型参数 `m, a`, 输出一个类型 `JoinList m a`. 
+
+​	甚至对于函数构建运算符 `->`
+
+```haskell
+Prelude> :k (->)
+(->) :: * -> * -> *
+```
+
+`->` 接受两个参数, 第一个是函数第一个参数的类型, 第二个是返回值类型, 输出一个函数类型.
+
+##### functor
+
+​	functor 在范畴学上指「函子」. 设 $C, D$ 为两个范畴, 从 $C$ 到 $D$ 的函子为一个映射 $F$ 满足
+
+- 将每个对象 $X\in C$ 映射到 $F(X)\in D$ 上,
+
+- 将每个态射 $f: X\rightarrow Y\in C$ 映射至一态射 $F(f): F(X)\rightarrow F(Y)\in D$, 且满足
+
+  - 对任何对象 $X\in C$, 恒有 $F(\bold{\mathrm{id}}_X) = \bold{\mathrm{id}}_{F(X)}$
+  - 对任何态射 $f: X\rightarrow Y, g:Y\rightarrow Z$, 恒有 $F(f\circ g) = F(f) \circ F(g)$. 
+
+  换言之, 函子会保持单位态射与态射的复合.
+
+​	在 Haskell 中, functor 的定义为
+
+```haskell
+-- f 为函子
+-- (a -> b) 为态射
+class Functor f where
+  fmap :: (a -> b) -> f a -> f b
+```
+
+`fmap` 接受一个 `a -> b` 的态射, 输出一个 `f a -> f b` 的态射, 此即为函子. 从 `fmap` 的定义可以看出, `Functor` 的任何实例必须是 `* -> *` 的 kind, 例如 `Maybe`
+
+```haskell
+instance Functor Maybe where
+  fmap _ Nothing = Nothing
+  fmap f (Just a) = Just (f a)
+```
+
+​	如果将 instance 改为 `(->) e`, 前面提到过 `->` 的 kind 为 `* -> * -> *`, 因此 `(->) e` 的 kind 为 `* -> *`, 符合 Functor 的要求. 
+
+​	令 `f = (->) e`, 则 `f a = e -> a`, 则 fmap 的类型可以写为
+
+```haskell
+fmap :: (a -> b) -> (e -> a) -> (e -> b)
+```
+
+可以看到, 这刚好是 Haskell `.` 运算符的定义. 
+
+```haskell
+instance Functor ((->) e) where
+  fmap = (.)
+```
